@@ -16,11 +16,23 @@ permissions:
 
 jobs:
   docker:
-    
+
     runs-on: ubuntu-latest
+    outputs:
+      can_push: ${{ steps.push-permission.outputs.can_push }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Check push permission
+        id: push-permission
+        run: |
+          # Push only for org-owned refs (non-fork) to avoid GHCR permission errors
+          if [[ "${{ github.repository_owner }}" == "EOPF-Explorer" ]] && { [[ "${{ github.event_name }}" != "pull_request" ]] || [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; }; then
+            echo "can_push=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "can_push=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Docker meta
         id: meta
@@ -41,6 +53,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Authenticate with GitHub Packages
+        if: steps.push-permission.outputs.can_push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -58,13 +71,14 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
+          push: ${{ steps.push-permission.outputs.can_push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
   helm:
     runs-on: ubuntu-latest
     needs: docker
+    if: needs.docker.outputs.can_push == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v5
